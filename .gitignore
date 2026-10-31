@@ -1,10 +1,33 @@
-# Python-generated files
+# Виртуальное окружение
+.venv/
+
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
 build/
 dist/
-wheels/
-*.egg-info
 
-# Virtual environments
-.venv
+# Данные и результаты расчётов
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Кэши инструментов
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Numba
+*.nbi
+*.nbc
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
