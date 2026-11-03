@@ -43,8 +43,11 @@ H = -J * Σ_{<i,j>} s_i * s_j
 
 ```
 ising_model/
+├── Dockerfile                # образ приложения
+├── docker-compose.yml        # запуск одной командой
+├── .dockerignore
 ├── pyproject.toml            # зависимости, сборка пакета, команда ising-model
-├── .python-version           # версия Python для uv
+├── .python-version           # версия Python
 ├── uv.lock                   # точные версии пакетов (коммитить)
 ├── .gitignore
 ├── README.md
@@ -53,6 +56,8 @@ ising_model/
 ├── data/                     # graphml-файлы (не в git)
 ├── results/                  # графики и массивы результатов (не в git)
 ├── notebooks/                # эксперименты
+├── scripts/
+│   └── check_lattice.py      # эталонный тест на решётке
 └── src/
     └── grid_ising/
         ├── __init__.py
@@ -104,26 +109,18 @@ graphml ──► loader.py ──► списки соседей ──► phys
 
 Зависимости направлены в одну сторону: `cli` и `ui` → `simulation` → `physics` / `loader`. Благодаря этому каждую часть можно тестировать отдельно.
 
-## Установка
+## Установка и запуск
 
-Нужен [uv](https://docs.astral.sh/uv/). Python подтянется автоматически.
+Нужен только [Docker](https://docs.docker.com/get-docker/) с Compose (на Windows: Docker Desktop с WSL2). Python и зависимости ставить не нужно: всё собирается внутри образа.
+
+### 1. Клонировать репозиторий
 
 ```powershell
 git clone <url-репозитория>
 cd ising_model
-uv sync
 ```
 
-Команда создаёт `.venv` и ставит зависимости: numpy, scipy, matplotlib, networkx, numba, streamlit, plotly (плюс dev-группа: ipykernel).
-
-Если нужен конкретный Python (numba поддерживает новые версии с задержкой):
-
-```powershell
-uv python pin 3.12
-uv sync
-```
-
-## Данные
+### 2. Положить данные
 
 Скачайте graphml-файлы из репозитория https://github.com/ComplexNetTSP/Power_grids (кнопка Raw) и положите в `data/`:
 
@@ -132,35 +129,43 @@ data/Denmark_highvoltage.graphml
 data/<файл Великобритании>.graphml
 ```
 
-## Запуск
+Папка `data/` подключается к контейнеру с вашего диска и в образ не попадает.
 
-Все команды выполняются из корня проекта (`ising_model/`).
-
-### Интерфейс
+### 3. Запустить
 
 ```powershell
-uv run streamlit run src/grid_ising/ui/app.py
+docker compose up --build
 ```
 
-Откроется страница в браузере. Параметры расчёта задаются в боковой панели, результаты показываются на вкладках. Тема интерфейса настраивается в `.streamlit/config.toml`.
+Откройте http://localhost:8501. Параметры расчёта задаются в боковой панели, результаты показываются на вкладках.
 
-### Быстрая проверка
-
-Маленькие параметры, без открытия окна. Проверяет, что всё установлено и работает:
+Первая сборка занимает несколько минут: ставятся scipy, numba, plotly. Следующие запуски быстрее:
 
 ```powershell
-uv run ising-model --n-temps 5 --steps-thermal 100 --steps-measure 100 --no-show
+docker compose up
 ```
 
-Если в `results/` появился файл `Denmark_highvoltage_thermo.png`, проект работает.
+Остановить: `Ctrl+C` или `docker compose down`. Запуск в фоне: `docker compose up -d`.
 
-### Основной расчёт для Дании
+Первый расчёт в интерфейсе начинается с компиляции numba-ядра, это займёт несколько секунд.
+
+### Расчёт из терминала
+
+Без интерфейса, в том же образе. В контейнере нет экрана, поэтому всегда указывайте `--no-show`: график сохраняется в `results/` на вашем диске.
+
+Быстрая проверка с маленькими параметрами:
 
 ```powershell
-uv run ising-model
+docker compose run --rm app ising-model --n-temps 5 --steps-thermal 100 --steps-measure 100 --no-show
 ```
 
-Используются параметры по умолчанию из `config.py` (30 температур, 2000 шагов разогрева, 3000 шагов измерения). График откроется в окне и сохранится в `results/`.
+Если в `results/` появился файл `Denmark_highvoltage_thermo.png`, всё работает.
+
+Основной расчёт для Дании с параметрами по умолчанию:
+
+```powershell
+docker compose run --rm app ising-model --no-show
+```
 
 ### Параметры командной строки
 
@@ -177,23 +182,27 @@ uv run ising-model
 
 ```powershell
 # другая сеть
-uv run ising-model --graph <файл_Великобритании>.graphml
+docker compose run --rm app ising-model --graph <файл_Великобритании>.graphml --no-show
 
-# подробный расчёт, только сохранить картинку
-uv run ising-model --n-temps 60 --steps-thermal 5000 --steps-measure 10000 --no-show
+# подробный расчёт
+docker compose run --rm app ising-model --n-temps 60 --steps-thermal 5000 --steps-measure 10000 --no-show
 ```
 
-Эквивалентные способы запуска:
+### Проверка ядра на решётке
 
 ```powershell
-uv run python -m grid_ising.cli
+docker compose run --rm -v ./scripts:/app/scripts:ro app python scripts/check_lattice.py
 ```
 
-Не запускайте `python src/grid_ising/cli.py` напрямую: пакет должен импортироваться как `grid_ising`.
+Должно получиться T_c ≈ 2.27.
 
 ### Настройка параметров по умолчанию
 
-Значения по умолчанию лежат в `src/grid_ising/config.py`: число температур, шаги, границы диапазона температур (в долях T_c), цвета и размер графиков. После правки файла пересобирать ничего не нужно, пакет установлен в редактируемом режиме.
+Значения по умолчанию лежат в `src/grid_ising/config.py`: число температур, шаги, границы диапазона температур (в долях T_c), цвета и размер графиков. Код копируется в образ при сборке, поэтому после любой правки в `src/` пересоберите образ:
+
+```powershell
+docker compose up --build
+```
 
 ## Как работает расчёт
 
@@ -210,12 +219,24 @@ uv run python -m grid_ising.cli
 
 Вблизи T_c стоит сгустить сетку температур и увеличить число шагов: там система релаксирует медленнее всего.
 
+## Локальная разработка (необязательно)
+
+Для работы с ноутбуками из `notebooks/` понадобится локальное окружение. Нужен [uv](https://docs.astral.sh/uv/):
+
+```powershell
+uv sync
+```
+
+В VS Code выберите ядро ноутбука из `.venv` проекта. Запуск самого проекта при этом по-прежнему идёт через Docker.
+
 ## Возможные проблемы
 
 | Ошибка | Причина и решение |
 |---|---|
-| `ModuleNotFoundError: grid_ising...` | Не выполнен `uv sync` или команда запущена не из корня проекта. |
-| `ModuleNotFoundError: scipy` (или другая библиотека) | `uv add <библиотека>`. |
-| `Expected a Python module at: src\ising_model\__init__.py` | В `pyproject.toml` не задан `[tool.uv.build-backend] module-name = "grid_ising"`. |
-| `AttributeError` про `PLOT` или `SIM` | В `config.py` не хватает поля в `PlotConfig` или `SimulationConfig`. |
-| Команда `ising-model` не найдена | Проверьте `[project.scripts]` в `pyproject.toml` и выполните `uv sync`. Запасной вариант: `uv run python -m grid_ising.cli`. |
+| `error during connect` или Docker не отвечает | Не запущен Docker Desktop. |
+| `port is already allocated` (порт 8501 занят) | Закройте другой Streamlit или поменяйте порт в `docker-compose.yml`: `"8502:8501"`. |
+| В интерфейсе «нет файлов .graphml» | Папка `data/` пуста или лежит не в корне проекта. |
+| `uv sync --frozen` падает при сборке | `uv.lock` не соответствует `pyproject.toml`. Выполните `uv lock` локально и закоммитьте файл. |
+| Не находится подходящий Python | Версия в первой строке `Dockerfile` не совпадает с `requires-python` в `pyproject.toml`. |
+| Сборка падает из-за пути с кириллицей | Переместите проект в папку с латинским названием. |
+| Изменения в коде не видны | Образ нужно пересобрать: `docker compose up --build`. |
