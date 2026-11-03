@@ -1,5 +1,6 @@
 # Виртуальное окружение
 .venv/
+.env
 
 # Python
 __pycache__/
@@ -17,14 +18,19 @@ results/*
 # Jupyter
 .ipynb_checkpoints/
 
-# Кэши инструментов
+# Кэши и отчёты инструментов
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 
 # Numba
 *.nbi
 *.nbc
+
+# Логи
+*.log
 
 # Редакторы и ОС
 .vscode/
