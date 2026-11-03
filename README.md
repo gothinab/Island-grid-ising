@@ -48,6 +48,8 @@ ising_model/
 ├── uv.lock                   # точные версии пакетов (коммитить)
 ├── .gitignore
 ├── README.md
+├── .streamlit/
+│   └── config.toml           # тема интерфейса
 ├── data/                     # graphml-файлы (не в git)
 ├── results/                  # графики и массивы результатов (не в git)
 ├── notebooks/                # эксперименты
@@ -63,9 +65,17 @@ ising_model/
         ├── data_io/
         │   ├── __init__.py
         │   └── loader.py     # граф -> списки соседей, класс NetworkFaultTolerance
-        └── visualization/
+        ├── visualization/
+        │   ├── __init__.py
+        │   └── plots.py      # графики
+        └── ui/
             ├── __init__.py
-            └── plots.py      # графики
+            ├── app.py        # точка входа интерфейса, сборка страницы
+            ├── theme.py      # палитра и CSS
+            ├── services.py   # загрузка графа, расчёты, кэш
+            ├── charts.py     # фигуры Plotly
+            ├── components.py # карточки, шапка, подвал
+            └── tabs.py       # вкладки интерфейса
 ```
 
 ### Назначение модулей
@@ -78,15 +88,21 @@ ising_model/
 | `core/physics.py` | Вычислительное ядро на `@njit`: `metropolis_step_graph`, `calculate_energy_graph`. Работает только с массивами numba, без networkx. |
 | `data_io/loader.py` | Класс `NetworkFaultTolerance`: читает граф networkx и строит для каждого узла массивы соседей и весов, считает `mean_degree`. |
 | `visualization/plots.py` | `plot_energy`, `plot_heat_capacity`, `plot_thermodynamics`. Принимают готовые данные и ничего не считают. |
+| `ui/app.py` | Точка входа интерфейса (Streamlit): боковая панель с параметрами, сборка страницы и вкладок. |
+| `ui/services.py` | Загрузка графа и расчёты с кэшированием, состояние сети при заданной температуре, координаты узлов. Без отрисовки. |
+| `ui/charts.py` | Фигуры Plotly: графики E(T) и C(T) с перекрестием, карта сети. |
+| `ui/tabs.py` | Содержимое вкладок «Термодинамика», «Карта сети», «О модели». |
+| `ui/components.py`, `ui/theme.py` | Карточки, шапка, подвал; палитра и CSS. |
 
 ### Поток данных
 
 ```
-graphml ──► loader.py ──► списки соседей ──► physics.py ◄── simulation.py ──► plots.py
-         (networkx)     (indices, weights)    (numba)       (цикл по T)      (графики в results/)
+graphml ──► loader.py ──► списки соседей ──► physics.py ◄── simulation.py ──┬──► plots.py (cli)
+         (networkx)     (indices, weights)    (numba)       (цикл по T)      │
+                                                                             └──► ui/services.py ──► ui/charts.py, ui/tabs.py (интерфейс)
 ```
 
-Зависимости направлены в одну сторону: `cli` → `simulation` → `physics` / `loader`. Благодаря этому каждую часть можно тестировать отдельно.
+Зависимости направлены в одну сторону: `cli` и `ui` → `simulation` → `physics` / `loader`. Благодаря этому каждую часть можно тестировать отдельно.
 
 ## Установка
 
@@ -98,7 +114,7 @@ cd ising_model
 uv sync
 ```
 
-Команда создаёт `.venv` и ставит зависимости: numpy, scipy, matplotlib, networkx, numba (плюс dev-группа: ipykernel).
+Команда создаёт `.venv` и ставит зависимости: numpy, scipy, matplotlib, networkx, numba, streamlit, plotly (плюс dev-группа: ipykernel).
 
 Если нужен конкретный Python (numba поддерживает новые версии с задержкой):
 
@@ -119,6 +135,14 @@ data/<файл Великобритании>.graphml
 ## Запуск
 
 Все команды выполняются из корня проекта (`ising_model/`).
+
+### Интерфейс
+
+```powershell
+uv run streamlit run src/grid_ising/ui/app.py
+```
+
+Откроется страница в браузере. Параметры расчёта задаются в боковой панели, результаты показываются на вкладках. Тема интерфейса настраивается в `.streamlit/config.toml`.
 
 ### Быстрая проверка
 
@@ -171,27 +195,4 @@ uv run python -m grid_ising.cli
 
 Значения по умолчанию лежат в `src/grid_ising/config.py`: число температур, шаги, границы диапазона температур (в долях T_c), цвета и размер графиков. После правки файла пересобирать ничего не нужно, пакет установлен в редактируемом режиме.
 
-## Как работает расчёт
-
-1. `loader.py` загружает граф и строит для каждого узла массивы соседей.
-2. Спины инициализируются случайно: `spins = np.random.choice([1, -1], size=N)`.
-3. Для каждой T из сетки (диапазон задаётся долями от теоретического T_c):
-   - **разогрев:** несколько тысяч шагов Метрополиса без записи, чтобы система вышла на равновесие;
-   - **измерения:** несколько тысяч шагов, на каждом записывается E;
-   - усреднение и подсчёт теплоёмкости C.
-4. T_c оценивается по положению максимума C(T) (и χ(T), когда она будет реализована).
-5. То же для второй сети, затем сравнение профилей и топологических характеристик.
-
-Один шаг Метрополиса — это N попыток переворота случайных узлов, то есть один «проход» по сети.
-
-Вблизи T_c стоит сгустить сетку температур и увеличить число шагов: там система релаксирует медленнее всего.
-
-## Возможные проблемы
-
-| Ошибка | Причина и решение |
-|---|---|
-| `ModuleNotFoundError: grid_ising...` | Не выполнен `uv sync` или команда запущена не из корня проекта. |
-| `ModuleNotFoundError: scipy` (или другая библиотека) | `uv add <библиотека>`. |
-| `Expected a Python module at: src\ising_model\__init__.py` | В `pyproject.toml` не задан `[tool.uv.build-backend] module-name = "grid_ising"`. |
-| `AttributeError` про `PLOT` или `SIM` | В `config.py` не хватает поля в `PlotConfig` или `SimulationConfig`. |
-| Команда `ising-model` не найдена | Проверьте `[project.scripts]` в `pyproject.toml` и выполните `uv sync`. Запасной вариант: `uv run python -m grid_ising.cli`. |
+## Как работает
